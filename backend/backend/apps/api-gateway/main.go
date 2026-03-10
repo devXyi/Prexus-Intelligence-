@@ -9,6 +9,7 @@ import (
 
 type AnalyzeRequest struct {
 	Prompt string `json:"prompt"`
+	Model  string `json:"model"` // "claude" or "gemini"
 }
 
 type ChatMessage struct {
@@ -18,11 +19,13 @@ type ChatMessage struct {
 
 type ChatRequest struct {
 	Messages []ChatMessage `json:"messages"`
+	Model    string        `json:"model"` // "claude" or "gemini"
 }
 
 type APIResponse struct {
 	Result string `json:"result,omitempty"`
 	Error  string `json:"error,omitempty"`
+	Model  string `json:"model,omitempty"`
 }
 
 func enableCORS(w http.ResponseWriter) {
@@ -47,6 +50,9 @@ func analyzeHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(APIResponse{Error: "prompt is required"})
 		return
 	}
+	if req.Model == "" {
+		req.Model = "claude"
+	}
 
 	fullPrompt := fmt.Sprintf(`You are Prexus, a probability predictive intelligence engine.
 Analyze the following scenario and provide:
@@ -56,12 +62,12 @@ Analyze the following scenario and provide:
 
 Scenario: %s`, req.Prompt)
 
-	result, err := AnalyzeProbability(fullPrompt)
+	result, err := AnalyzeProbability(fullPrompt, req.Model)
 	if err != nil {
 		json.NewEncoder(w).Encode(APIResponse{Error: err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(APIResponse{Result: result})
+	json.NewEncoder(w).Encode(APIResponse{Result: result, Model: req.Model})
 }
 
 func chatHandler(w http.ResponseWriter, r *http.Request) {
@@ -75,16 +81,19 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(APIResponse{Error: "messages are required"})
 		return
 	}
+	if req.Model == "" {
+		req.Model = "claude"
+	}
 
 	lastMsg := req.Messages[len(req.Messages)-1].Content
 	fullPrompt := fmt.Sprintf("You are Prexus, an intelligent assistant specialized in probability analysis. Be concise and data-driven.\n\nUser: %s", lastMsg)
 
-	result, err := AnalyzeProbability(fullPrompt)
+	result, err := AnalyzeProbability(fullPrompt, req.Model)
 	if err != nil {
 		json.NewEncoder(w).Encode(APIResponse{Error: err.Error()})
 		return
 	}
-	json.NewEncoder(w).Encode(APIResponse{Result: result})
+	json.NewEncoder(w).Encode(APIResponse{Result: result, Model: req.Model})
 }
 
 func main() {
