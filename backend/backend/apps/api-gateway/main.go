@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-
-	kernel "github.com/devXyi/Prexus-Intelligence-/backend/internal/kernel"
 )
 
 type AnalyzeRequest struct {
@@ -58,7 +56,7 @@ Analyze the following scenario and provide:
 
 Scenario: %s`, req.Prompt)
 
-	result, err := kernel.AnalyzeProbability(fullPrompt)
+	result, err := AnalyzeProbability(fullPrompt)
 	if err != nil {
 		json.NewEncoder(w).Encode(APIResponse{Error: err.Error()})
 		return
@@ -81,7 +79,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	lastMsg := req.Messages[len(req.Messages)-1].Content
 	fullPrompt := fmt.Sprintf("You are Prexus, an intelligent assistant specialized in probability analysis. Be concise and data-driven.\n\nUser: %s", lastMsg)
 
-	result, err := kernel.AnalyzeProbability(fullPrompt)
+	result, err := AnalyzeProbability(fullPrompt)
 	if err != nil {
 		json.NewEncoder(w).Encode(APIResponse{Error: err.Error()})
 		return
