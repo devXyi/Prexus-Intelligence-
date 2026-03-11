@@ -9,7 +9,6 @@ import (
 	"os"
 )
 
-// AnalyzeProbability routes to the correct AI based on model choice
 func AnalyzeProbability(prompt string, model string) (string, error) {
 	switch model {
 	case "gemini":
@@ -21,16 +20,12 @@ func AnalyzeProbability(prompt string, model string) (string, error) {
 	}
 }
 
-// ── Claude (Anthropic) ──────────────────────────────
 func callClaude(prompt string) (string, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
-	}
+	if apiKey == "" { return "", fmt.Errorf("ANTHROPIC_API_KEY not set") }
 	body, _ := json.Marshal(map[string]interface{}{
-		"model":      "claude-sonnet-4-20250514",
-		"max_tokens": 1024,
-		"messages":   []map[string]string{{"role": "user", "content": prompt}},
+		"model": "claude-sonnet-4-20250514", "max_tokens": 1024,
+		"messages": []map[string]string{{"role": "user", "content": prompt}},
 	})
 	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(body))
 	req.Header.Set("x-api-key", apiKey)
@@ -45,12 +40,11 @@ func callClaude(prompt string) (string, error) {
 	}
 	b, _ := io.ReadAll(resp.Body)
 	json.Unmarshal(b, &result)
-	if result.Error != nil { return "", fmt.Errorf("Claude API error: %s", result.Error.Message) }
+	if result.Error != nil { return "", fmt.Errorf("Claude error: %s", result.Error.Message) }
 	if len(result.Content) > 0 { return result.Content[0].Text, nil }
-	return "", fmt.Errorf("empty response from Claude")
+	return "", fmt.Errorf("Claude empty response: %s", string(b))
 }
 
-// ── Gemini (Google) ─────────────────────────────────
 func callGemini(prompt string) (string, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" { return "", fmt.Errorf("GEMINI_API_KEY not set") }
@@ -63,6 +57,21 @@ func callGemini(prompt string) (string, error) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil { return "", err }
 	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+
+	// First check for API error
+	var errResp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"error,omitempty"`
+	}
+	json.Unmarshal(b, &errResp)
+	if errResp.Error != nil {
+		return "", fmt.Errorf("Gemini error %d: %s", errResp.Error.Code, errResp.Error.Message)
+	}
+
 	var result struct {
 		Candidates []struct {
 			Content struct {
@@ -70,22 +79,19 @@ func callGemini(prompt string) (string, error) {
 			} `json:"content"`
 		} `json:"candidates"`
 	}
-	b, _ := io.ReadAll(resp.Body)
 	json.Unmarshal(b, &result)
 	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
 		return result.Candidates[0].Content.Parts[0].Text, nil
 	}
-	return "", fmt.Errorf("empty response from Gemini")
+	return "", fmt.Errorf("Gemini empty: %s", string(b))
 }
 
-// ── ChatGPT (OpenAI) ─────────────────────────────────
 func callOpenAI(prompt string) (string, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" { return "", fmt.Errorf("OPENAI_API_KEY not set") }
 	body, _ := json.Marshal(map[string]interface{}{
-		"model":      "gpt-4o",
-		"max_tokens": 1024,
-		"messages":   []map[string]string{{"role": "user", "content": prompt}},
+		"model": "gpt-4o", "max_tokens": 1024,
+		"messages": []map[string]string{{"role": "user", "content": prompt}},
 	})
 	req, _ := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(body))
 	req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -101,8 +107,7 @@ func callOpenAI(prompt string) (string, error) {
 	}
 	b, _ := io.ReadAll(resp.Body)
 	json.Unmarshal(b, &result)
-	if result.Error != nil { return "", fmt.Errorf("OpenAI API error: %s", result.Error.Message) }
+	if result.Error != nil { return "", fmt.Errorf("OpenAI error: %s", result.Error.Message) }
 	if len(result.Choices) > 0 { return result.Choices[0].Message.Content, nil }
-	return "", fmt.Errorf("empty response from OpenAI")
+	return "", fmt.Errorf("OpenAI empty response")
 }
-
