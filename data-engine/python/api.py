@@ -7,7 +7,9 @@ Works on Python 3.11, 3.12, 3.13, 3.14 with any fastapi/pydantic combo.
 
 import asyncio
 import logging
-import os
+import os 
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
