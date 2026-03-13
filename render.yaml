@@ -1,0 +1,55 @@
+# render.yaml
+# Defines both Render services in one file.
+# Commit to repo root → Render auto-detects and deploys both.
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+
+  # ── Service 1: Go API Backend (existing) ─────────────────────────────────
+  - type: web
+    name: prexus-intelligence
+    runtime: go
+    rootDir: backend/backend
+    buildCommand: go build -o app ./apps/api-gateway/
+    startCommand: ./app
+    plan: free
+    envVars:
+      - key: PORT
+        value: "8080"
+      - key: SUPABASE_URL
+        sync: false       # set manually in Render dashboard
+      - key: SUPABASE_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: DATA_ENGINE_URL
+        fromService:
+          name: meteorium-engine
+          type: web
+          property: host      # Render auto-fills the other service's URL
+      - key: DATA_ENGINE_KEY
+        sync: false           # set same value in both services manually
+
+  # ── Service 2: Python Data Engine (new) ───────────────────────────────────
+  - type: web
+    name: meteorium-engine
+    runtime: python
+    rootDir: data-engine/python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: PORT
+        value: "8001"
+      - key: DATA_ENGINE_KEY
+        sync: false           # same secret as Go service
+      - key: NASA_FIRMS_KEY
+        sync: false           # from firms.modaps.eosdis.nasa.gov (free)
+      - key: ALPHA_VANTAGE_KEY
+        sync: false           # from alphavantage.co (free)
