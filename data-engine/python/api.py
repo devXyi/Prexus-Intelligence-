@@ -9,8 +9,10 @@ import asyncio
 import logging
 import os 
 import sys
-sys.path.insert(0, os.path.dirname(__file__))
-from contextlib import asynccontextmanager
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
