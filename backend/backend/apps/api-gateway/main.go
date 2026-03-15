@@ -53,7 +53,7 @@ func main() {
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
-		AllowCredentials: true,
+		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}))
 
@@ -125,4 +125,3 @@ func init() {
 ╚══════════════════════════════════════════╝
 `, VERSION)
 }
-
