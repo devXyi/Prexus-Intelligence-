@@ -1,0 +1,93 @@
+/* ═══════════════════════════════════════════════════════
+   tokens.css
+   Prexus Intelligence — Design System Tokens
+   THE GREAT FILE · Phase 1
+   Single source of truth. Every color, size, font, shadow
+   comes from here. Never hardcode values in other CSS files.
+═══════════════════════════════════════════════════════ */
+
+:root {
+
+  /* ── Color: Backgrounds ─────────────────────────────── */
+  --bg-void:     #020912;   /* deepest background         */
+  --bg-1:        #04101f;   /* panels, sidebar             */
+  --bg-2:        #06162a;   /* elevated surfaces           */
+  --bg-3:        #091e35;   /* hover states                */
+
+  /* ── Color: Authority (Cobalt) ──────────────────────── */
+  --cobalt:      #0EA5E9;
+  --cobalt-lo:   rgba(14, 165, 233, 0.07);
+  --cobalt-mid:  rgba(14, 165, 233, 0.15);
+  --cobalt-hi:   rgba(14, 165, 233, 0.30);
+  --cobalt-wire: rgba(14, 165, 233, 0.12);
+
+  /* ── Color: Text ────────────────────────────────────── */
+  --text-primary:  #E0F0FF;  /* headings, values           */
+  --text-secondary:#7BA4C0;  /* labels, descriptions       */
+  --text-muted:    #2A4A65;  /* disabled, placeholder      */
+  --text-ghost:    #122035;  /* decorative only            */
+
+  /* ── Color: Semantic ────────────────────────────────── */
+  --red:         #EF4444;
+  --red-lo:      rgba(239, 68,  68,  0.08);
+  --amber:       #F59E0B;
+  --amber-lo:    rgba(245, 158, 11,  0.08);
+  --green:       #10B981;
+  --green-lo:    rgba(16,  185, 129, 0.08);
+  --orange:      #F97316;
+
+  /* ── Color: Borders ─────────────────────────────────── */
+  --border:      rgba(14, 165, 233, 0.12);
+  --border-hi:   rgba(14, 165, 233, 0.24);
+  --border-input:rgba(255, 255, 255, 0.09);
+
+  /* ── Typography ─────────────────────────────────────── */
+  --font-display: 'Bebas Neue', sans-serif;
+  --font-data:    'Martian Mono', monospace;
+  --font-ui:      'IBM Plex Sans', sans-serif;
+  --font-serif:   'Source Serif 4', serif;
+
+  /* ── Font sizes ─────────────────────────────────────── */
+  --text-xs:   8px;
+  --text-sm:   10px;
+  --text-base: 12px;
+  --text-md:   14px;
+  --text-lg:   16px;
+
+  /* ── Spacing ─────────────────────────────────────────── */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ── Radius ──────────────────────────────────────────── */
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ── Transitions ─────────────────────────────────────── */
+  --transition-fast:   all 0.15s ease;
+  --transition-base:   all 0.25s ease;
+  --transition-spring: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ── Shadows ─────────────────────────────────────────── */
+  --shadow-panel: 0 25px 50px rgba(0, 0, 0, 0.5);
+  --shadow-glow:  0 0 22px rgba(14, 165, 233, 0.35),
+                  0 0 60px rgba(14, 165, 233, 0.12);
+  --shadow-glow-green: 0 0 18px rgba(16, 185, 129, 0.35);
+
+  /* ── Z-index scale ───────────────────────────────────── */
+  --z-base:    1;
+  --z-overlay: 50;
+  --z-modal:   100;
+  --z-toast:   200;
+  --z-noise:   9998;
+  --z-cookie:  9999;
+}
+
