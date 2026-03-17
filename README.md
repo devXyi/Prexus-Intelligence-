@@ -7,7 +7,7 @@
 
 [![Status](https://img.shields.io/badge/Status-Active_Development-22C55E?style=flat-square&labelColor=0D1117)](.)
 [![Version](https://img.shields.io/badge/Version-2.0.0--prx-0066FF?style=flat-square&labelColor=0D1117)](.)
-[![License](https://img.shields.io/badge/License-Proprietary-EF4444?style=flat-square&labelColor=0D1117)](.)
+[![Commercial modules](https://img.shields.io/badge/License-Proprietary-EF4444?style=flat-square&labelColor=0D1117)](.)
 [![Security](https://img.shields.io/badge/Security-ISO_27001_·_SOC_2-7C3AED?style=flat-square&labelColor=0D1117)](.)
 [![Clearance](https://img.shields.io/badge/Clearance-RESTRICTED-F59E0B?style=flat-square&labelColor=0D1117)](.)
 
