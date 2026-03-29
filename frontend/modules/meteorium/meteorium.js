@@ -1,249 +1,263 @@
 /**
  * modules/meteorium/meteorium.js
- * Prexus Intelligence — Meteorium Shell
- * THE GREAT FILE · Phase 2
+ * Prexus Intelligence — Meteorium Module Orchestrator
+ *
+ * Controls: sidebar nav, topbar, module mounting/unmounting.
+ * Every sub-module calls updateTopbar() from here.
  */
 
-import { store } from '../../js/store.js';
-import { riskHealth, gatewayHealth, getAssets } from '../../js/api.js';
-import { startClock, fPct } from '../../js/utils.js';
+import { store, subscribe }             from '../../js/store.js';
+import { initPrefetch, destroyPrefetch } from '../../js/prefetch.js';
+import { startPredictionScheduler, stopPredictionScheduler } from '../../js/predict.js';
+import { logout }   from '../../js/auth.js';
+import { navigate } from '../../js/router.js';
+import { startClock } from '../../js/utils.js';
 
-const MODULE_LOADERS = {
+/* ── Lazy module imports ─────────────────────────────────── */
+const MODULES = {
   dashboard: () => import('./dashboard.js'),
-  alerts:    () => import('./alerts.js'),
-  signals:   () => import('./signals.js'),
-  analysis:  () => import('./analysis.js'),
   portfolio: () => import('./portfolio.js'),
-  pipeline:  () => import('./pipeline.js'),
+  analysis:  () => import('./analysis.js'),
+  signals:   () => import('./signals.js'),
   sources:   () => import('./sources.js'),
+  pipeline:  () => import('./pipeline.js'),
   ai:        () => import('./ai.js'),
 };
 
-const MODULE_META = {
-  dashboard: { label: 'Intelligence Overview',  icon: '⬡', section: 'COMMAND'  },
-  alerts:    { label: 'Alert Command Center',    icon: '⚠', section: 'COMMAND'  },
-  signals:   { label: 'Climate Signals',         icon: '◈', section: 'ANALYSIS' },
-  analysis:  { label: 'Risk Analysis',           icon: '◉', section: 'ANALYSIS' },
-  portfolio: { label: 'Asset Portfolio',         icon: '≡', section: 'ANALYSIS' },
-  pipeline:  { label: 'Pipeline Status',         icon: '⊕', section: 'SYSTEM'   },
-  sources:   { label: 'Data Sources',            icon: '◎', section: 'SYSTEM'   },
-  ai:        { label: 'AI Intelligence',         icon: '✦', section: 'SYSTEM'   },
+const NAV = [
+  { id:'dashboard', ico:'fa-chart-line',     label:'Overview'       },
+  { id:'portfolio', ico:'fa-layer-group',    label:'Asset Portfolio' },
+  { id:'analysis',  ico:'fa-bolt',           label:'Risk Analysis'   },
+  { id:'signals',   ico:'fa-wave-square',    label:'Signals'        },
+  { id:'sources',   ico:'fa-satellite-dish', label:'Data Sources'   },
+  { id:'pipeline',  ico:'fa-sitemap',        label:'Pipeline'       },
+  { id:'ai',        ico:'fa-microchip',      label:'AI Intelligence', badge:'AI' },
+];
+
+const VIEW_TITLES = {
+  dashboard: 'Overview',
+  portfolio: 'Asset Portfolio',
+  analysis:  'Risk Analysis',
+  signals:   'Signals',
+  sources:   'Data Sources',
+  pipeline:  'Pipeline',
+  ai:        'AI Intelligence',
 };
 
-let _currentModule  = null;
-let _currentModId   = '';
-let _moduleCache    = {};
-let _clockStop      = null;
-let _healthInterval = null;
+let _activeModule  = null;
+let _activeId      = null;
+let _clockStop     = null;
 
-export function initMeteorium(opts = {}) {
-  const { onBack, onLogout } = opts;
-  _renderShell(onBack, onLogout);
+/* ══════════════════════════════════════════════════════════
+   PUBLIC API
+══════════════════════════════════════════════════════════ */
+
+/** Called by app.js when navigating to Meteorium */
+export async function initMeteorium() {
+  _renderShell();
+  startPredictionScheduler();
+  initPrefetch();
   _startClock();
-  _fetchSystemHealth();
-  _healthInterval = setInterval(_fetchSystemHealth, 60_000);
-  _ensureAssets();
-  navigateTo('dashboard');
+  await _mount('dashboard');
 }
 
+/** Destroy Meteorium — called on navigate away */
 export function destroyMeteorium() {
-  if (_clockStop)      { _clockStop();                  _clockStop = null; }
-  if (_healthInterval) { clearInterval(_healthInterval); _healthInterval = null; }
-  if (_currentModule?.destroy) _currentModule.destroy();
-  _currentModule = null;
-  _currentModId  = '';
-  _moduleCache   = {};
+  _unmountCurrent();
+  stopPredictionScheduler();
+  destroyPrefetch();
+  if (_clockStop) { _clockStop(); _clockStop = null; }
 }
 
-function _renderShell(onBack, onLogout) {
-  const root = document.getElementById('meteorium-root');
-  if (!root) return;
+/**
+ * Sub-modules call this to push data into the topbar.
+ * @param {object} opts - { signalCount, title }
+ */
+export function updateTopbar(opts = {}) {
+  if (opts.title) {
+    const el = document.getElementById('met-topbar-title');
+    if (el) el.textContent = opts.title;
+  }
+  if (opts.signalCount !== undefined) {
+    const el = document.getElementById('met-topbar-alerts');
+    if (el) {
+      el.textContent = opts.signalCount;
+      el.style.display = opts.signalCount > 0 ? 'flex' : 'none';
+    }
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   SHELL RENDER
+══════════════════════════════════════════════════════════ */
+
+function _renderShell() {
+  const page = document.getElementById('page-meteorium');
+  if (!page) return;
+
   const user = store.get('user');
   const org  = store.get('org');
 
-  root.innerHTML = `
-    <div id="met-shell">
-      <div class="met-cls">FOUO // Sensitive But Unclassified // Distribution Authorized</div>
-      <div id="met-topbar">
-        <div class="met-tb-logo">
-          <div style="display:flex;flex-direction:column;gap:1px">
-            <span class="met-tb-wordmark">PREXUS</span>
-            <span class="met-tb-product">Meteorium v2.0</span>
+  page.innerHTML = `
+    <!-- Classification banner -->
+    <div class="met-cls">UNCLASSIFIED // FOR OFFICIAL USE ONLY (FOUO) // DISTRIBUTION C // METEORIUM PLATFORM v3.1.0</div>
+
+    <!-- App shell -->
+    <div class="met-shell">
+
+      <!-- Sidebar -->
+      <div class="met-sidebar">
+        <div class="met-sidebar-logo">
+          <div class="met-sidebar-icon">
+            <i class="fa-solid fa-cloud-bolt" style="font-size:13px;color:var(--cobalt)"></i>
           </div>
-        </div>
-        <div class="met-tb-instruments">
-          ${_inst('Global Risk','0%','cobalt','met-inst-risk')}
-          <div class="met-tb-div"></div>
-          ${_inst('Signals','0','cobalt','met-inst-signals')}
-          ${_inst('Alerts','0','cobalt','met-inst-alerts')}
-          ${_inst('Assets','0','cobalt','met-inst-assets')}
-          <div class="met-tb-div"></div>
-          ${_inst('Engine','—','dim','met-inst-engine')}
-          ${_inst('Queue','—','dim','met-inst-queue')}
-        </div>
-        <div class="met-tb-right">
           <div>
-            <div id="met-clock" class="met-tb-clock">—</div>
-            <div id="met-date" class="met-tb-date" style="text-align:right">—</div>
-          </div>
-          <div class="met-tb-user" id="met-user-btn" title="Back to Hub">
-            <div class="met-tb-avatar">⬡</div>
-            <div>
-              <div style="font-size:9px;color:var(--text-primary);font-family:var(--font-data);letter-spacing:.06em">
-                ${(user?.full_name || user?.email || 'USER').toUpperCase().slice(0,14)}
-              </div>
-              <div style="font-size:7px;color:var(--text-muted);letter-spacing:.1em;text-transform:uppercase">
-                ${org?.orgName?.slice(0,18) || 'ORG ADMIN'}
-              </div>
-            </div>
+            <div class="met-sidebar-name">METEORIUM</div>
+            <div class="met-sidebar-sub">by PREXUS</div>
           </div>
         </div>
+
+        <div style="padding:8px 0;flex:1;overflow:auto">
+          <div class="met-nav-section">Navigation</div>
+          ${NAV.map(n => `
+            <div class="met-nav-item ${n.id === 'dashboard' ? 'active' : ''}" id="nav-${n.id}" onclick="window._met_nav('${n.id}')">
+              <span class="ico"><i class="fa-solid ${n.ico}"></i></span>
+              ${n.label}
+              ${n.badge ? `<span class="met-nav-badge">${n.badge}</span>` : ''}
+            </div>`).join('')}
+
+          <div class="met-nav-section" style="margin-top:14px">System</div>
+          <div class="met-nav-item" onclick="window._met_back()">
+            <span class="ico"><i class="fa-solid fa-grid-2"></i></span>
+            Back to Hub
+          </div>
+        </div>
+
+        <div class="met-sidebar-footer">
+          <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">
+            <span class="status-dot live pulse"></span>
+            <span style="font-family:var(--font-data);font-size:8px;color:var(--text-muted)">Kernel ONLINE</span>
+          </div>
+          ${[['ORG', org?.orgName || user?.org_name || '—'],['ROLE', user?.role || 'ORG_ADMIN'],['USER', user?.email || '—']].map(([k,v]) =>
+            `<div class="met-user-line">${k}: <span style="color:${k==='ROLE'?'var(--green)':'var(--text-secondary)'}">${v}</span></div>`).join('')}
+          <button onclick="window._met_logout()"
+            style="width:100%;margin-top:8px;padding:5px;background:transparent;border:1px solid var(--border);color:var(--text-secondary);border-radius:3px;cursor:pointer;font-family:var(--font-data);font-size:9px;letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .2s"
+            onmouseover="this.style.borderColor='var(--border-hi)';this.style.color='var(--text-primary)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-secondary)'">
+            <i class="fa-solid fa-right-from-bracket"></i>Sign Out
+          </button>
+        </div>
       </div>
-      <div id="met-main">
-        <div id="met-sidebar">
-          <div id="met-nav"></div>
-          <div class="met-sidebar-bottom">
-            <div class="met-sidebar-status">
+
+      <!-- Main -->
+      <div class="met-main">
+        <!-- Topbar -->
+        <div class="met-topbar">
+          <span class="met-topbar-title" id="met-topbar-title">Overview</span>
+          <div class="met-topbar-right">
+            <span id="met-loading-indicator" style="font-family:var(--font-data);font-size:8px;color:var(--text-muted);display:none">Loading…</span>
+            <div style="display:flex;align-items:center;gap:5px">
               <span class="status-dot live pulse"></span>
-              <span style="font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">System Nominal</span>
+              <span style="font-family:var(--font-data);font-size:8.5px;color:var(--text-muted)">LIVE</span>
             </div>
-            <div class="met-sidebar-meta"><span>${user?.email?.slice(0,22) || '—'}</span></div>
-            <div class="met-sidebar-meta">Role: <span class="role">ORG_ADMIN</span></div>
-            <button class="met-btn-signout" id="met-signout-btn">
-              <i class="fa-solid fa-right-from-bracket" style="font-size:8px"></i>Sign Out
-            </button>
+            <span id="met-utc-clock" style="font-family:var(--font-data);font-size:9px;color:var(--text-muted)"></span>
+            <div id="met-topbar-alerts" style="display:none;align-items:center;gap:4px">
+              <i class="fa-solid fa-bell" style="font-size:10px;color:var(--amber)"></i>
+              <span style="font-family:var(--font-data);font-size:9.5px;color:var(--amber);font-weight:700">0</span>
+            </div>
           </div>
         </div>
-        <div id="met-workspace">
-          <div id="met-workspace-head">
-            <span class="met-ws-title" id="met-ws-title">Intelligence Overview</span>
-            <div class="met-ws-right">
-              <span class="tag tag-cobalt" id="met-ws-tag">DASHBOARD</span>
-            </div>
+
+        <!-- Workspace -->
+        <div class="met-workspace" id="met-workspace">
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-family:var(--font-data);font-size:10px">
+            <span class="spinner"></span>&nbsp;Loading…
           </div>
-          <div id="met-workspace-body"></div>
         </div>
       </div>
-    </div>`;
+    </div>
 
-  _renderNav();
-  document.getElementById('met-user-btn')?.addEventListener('click', () => { if (onBack) onBack(); });
-  document.getElementById('met-signout-btn')?.addEventListener('click', () => { if (onLogout) onLogout(); });
+    <!-- Classification footer -->
+    <div class="met-cls">UNCLASSIFIED // FOR OFFICIAL USE ONLY (FOUO) // DISTRIBUTION C // PROPRIETARY — PREXUS INC.</div>`;
+
+  /* Wire global handlers */
+  window._met_nav    = _navTo;
+  window._met_back   = () => { if (window._met_onBack) window._met_onBack(); else navigate('hub'); };
+  window._met_logout = () => logout();
 }
 
-function _inst(label, value, cls, id) {
-  return `<div class="met-tb-instrument">
-    <div class="met-tb-instrument-label">${label}</div>
-    <div class="met-tb-instrument-value ${cls}" id="${id}">${value}</div>
+/* ══════════════════════════════════════════════════════════
+   MODULE MOUNTING
+══════════════════════════════════════════════════════════ */
+
+async function _mount(id) {
+  if (_activeId === id) return;
+
+  _unmountCurrent();
+  stopPredictionScheduler();
+  destroyPrefetch();
+  _setNavActive(id);
+
+  const workspace = document.getElementById('met-workspace');
+  if (!workspace) return;
+
+  // Update topbar title immediately
+  const titleEl = document.getElementById('met-topbar-title');
+  if (titleEl) titleEl.textContent = VIEW_TITLES[id] || id;
+
+  // Show loader
+  workspace.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-family:var(--font-data);font-size:10px">
+    <span class="spinner"></span>&nbsp;Loading ${VIEW_TITLES[id]}…
   </div>`;
-}
 
-function _renderNav() {
-  const nav = document.getElementById('met-nav');
-  if (!nav) return;
-  const sections = ['COMMAND','ANALYSIS','SYSTEM'];
-  let html = '';
-  for (const sec of sections) {
-    const items = Object.entries(MODULE_META).filter(([,m]) => m.section === sec);
-    html += `<div class="met-nav-section"><div class="met-nav-section-label">${sec}</div>`;
-    for (const [id, meta] of items) {
-      const badge = id === 'alerts' ? `<span class="met-nav-badge crit" id="nav-badge-alerts">0</span>` : '';
-      html += `<div class="met-nav-item" id="nav-${id}" onclick="window._met.nav('${id}')">
-        <span class="met-nav-icon">${meta.icon}</span><span>${meta.label}</span>${badge}
-      </div>`;
-    }
-    html += `</div>`;
-  }
-  nav.innerHTML = html;
-}
+  const loader = MODULES[id];
+  if (!loader) return;
 
-export async function navigateTo(modId) {
-  if (modId === _currentModId) return;
-  if (_currentModule?.destroy) { try { _currentModule.destroy(); } catch {} }
-  document.querySelectorAll('.met-nav-item').forEach(el => el.classList.remove('active'));
-  document.getElementById(`nav-${modId}`)?.classList.add('active');
-  const meta = MODULE_META[modId];
-  const titleEl = document.getElementById('met-ws-title');
-  const tagEl   = document.getElementById('met-ws-tag');
-  if (titleEl) titleEl.textContent = meta?.label || modId;
-  if (tagEl)   tagEl.textContent   = modId.toUpperCase();
-  const body = document.getElementById('met-workspace-body');
-  if (body) body.innerHTML = `<div class="met-view" style="padding:20px;text-align:center;color:var(--text-muted);font-size:10px;letter-spacing:.1em;text-transform:uppercase"><span class="spinner"></span>&nbsp;Loading…</div>`;
-  _currentModId = modId;
   try {
-    if (!_moduleCache[modId]) {
-      const loader = MODULE_LOADERS[modId];
-      if (!loader) throw new Error(`No loader: ${modId}`);
-      _moduleCache[modId] = await loader();
-    }
-    _currentModule = _moduleCache[modId];
-    if (body) body.innerHTML = '';
-    const wrapper = document.createElement('div');
-    wrapper.className = 'met-view';
-    body?.appendChild(wrapper);
-    await _currentModule.init(wrapper);
-  } catch (err) {
-    console.error(`[Meteorium] Module error (${modId}):`, err);
-    if (body) body.innerHTML = `<div class="met-view" style="padding:20px">
-      <div style="background:var(--red-lo);border:1px solid rgba(239,68,68,.3);border-radius:4px;padding:14px;font-size:11px;color:var(--red)">
-        ⚠ Module failed to load: ${err.message}
-      </div></div>`;
+    const mod = await loader();
+    _activeModule = mod;
+    _activeId = id;
+    store.set('module', id);
+
+    // Clear workspace and mount
+    workspace.innerHTML = '';
+    await mod.init(workspace);
+  } catch (e) {
+    console.error(`[meteorium] Failed to load module "${id}":`, e);
+    workspace.innerHTML = `<div style="padding:20px;color:var(--red);font-family:var(--font-data);font-size:10px;background:var(--red-lo);border:1px solid rgba(239,68,68,.3);border-radius:3px;margin:14px">
+      ⚠ Failed to load ${id}: ${e.message}
+    </div>`;
   }
 }
 
-window._met = { nav: navigateTo };
+function _unmountCurrent() {
+  if (_activeModule?.destroy) {
+    try { _activeModule.destroy(); } catch {}
+  }
+  _activeModule = null;
+  _activeId = null;
+}
 
-function _startClock() {
-  _clockStop = startClock(({ time, date }) => {
-    const c = document.getElementById('met-clock');
-    const d = document.getElementById('met-date');
-    if (c) c.textContent = time;
-    if (d) d.textContent = date;
+async function _navTo(id) {
+  if (_activeId === id) return;
+  await _mount(id);
+}
+
+function _setNavActive(id) {
+  NAV.forEach(n => {
+    const el = document.getElementById(`nav-${n.id}`);
+    if (el) el.classList.toggle('active', n.id === id);
   });
 }
 
-async function _fetchSystemHealth() {
-  try {
-    const [, rh] = await Promise.allSettled([gatewayHealth(), riskHealth()]);
-    if (rh.status === 'fulfilled') {
-      const data = rh.value;
-      const rust  = data.rust_engine    || false;
-      const queue = data.queue?.available || false;
-      _setInst('met-inst-engine', rust  ? 'RUST'   : 'PY',     rust  ? 'green' : 'amber');
-      _setInst('met-inst-queue',  queue ? 'ONLINE' : 'OFF',    queue ? 'green' : 'amber');
-    }
-  } catch {}
-}
+/* ══════════════════════════════════════════════════════════
+   CLOCK
+══════════════════════════════════════════════════════════ */
 
-function _setInst(id, value, cls) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = value;
-  el.className   = `met-tb-instrument-value ${cls}`;
+function _startClock() {
+  if (_clockStop) _clockStop();
+  _clockStop = startClock(({ time }) => {
+    const el = document.getElementById('met-utc-clock');
+    if (el) el.textContent = time;
+  });
 }
-
-export function updateTopbar({ alertCount, signalCount, portfolioRisk } = {}) {
-  if (alertCount !== undefined) {
-    _setInst('met-inst-alerts', String(alertCount), alertCount > 0 ? 'red' : 'cobalt');
-    const badge = document.getElementById('nav-badge-alerts');
-    if (badge) badge.textContent = alertCount;
-  }
-  if (signalCount !== undefined) _setInst('met-inst-signals', String(signalCount), 'cobalt');
-  if (portfolioRisk !== undefined) {
-    store.set('portfolioRisk', portfolioRisk);
-    const cls = portfolioRisk >= 0.65 ? 'red' : portfolioRisk >= 0.45 ? 'amber' : 'cobalt';
-    _setInst('met-inst-risk', fPct(portfolioRisk), cls);
-  }
-}
-
-async function _ensureAssets() {
-  if ((store.get('assets') || []).length === 0) {
-    try {
-      const assets = await getAssets();
-      if (Array.isArray(assets)) { store.set('assets', assets); _setInst('met-inst-assets', String(assets.length), 'cobalt'); }
-    } catch {}
-  } else {
-    _setInst('met-inst-assets', String((store.get('assets') || []).length), 'cobalt');
-  }
-}
-
