@@ -1,7 +1,6 @@
 // backend/apps/api-gateway/main.go
-// Prexus Intelligence — API Gateway
-// Go service: JWT auth, user management, asset CRUD, AI proxy routing.
-// Proxies risk computation requests to the Python data engine.
+// Prexus Intelligence — API Gateway (FIXED)
+// Added /claude route + optional public AI access for testing.
 
 package main
 
@@ -17,10 +16,9 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const VERSION = "2.0.0"
+const VERSION = "2.0.1"
 
 func main() {
-	// Load .env if present (local dev)
 	_ = godotenv.Load()
 
 	port := os.Getenv("PORT")
@@ -33,21 +31,20 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	// ── Database ───────────────────────────────────────────────────────────
+	// ── Database ─────────────────────────────────────────────
 	if err := InitDB(); err != nil {
 		log.Fatalf("Database init failed: %v", err)
 	}
 	defer CloseDB()
 
 	log.Printf("✓ Database connected")
-	log.Printf("✓ Rust engine proxy: %s", getDataEngineURL())
+	log.Printf("✓ Data engine: %s", getDataEngineURL())
 
-	// ── Router ─────────────────────────────────────────────────────────────
+	// ── Router ───────────────────────────────────────────────
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(requestLogger())
 
-	// CORS — allow Meteorium frontend
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"*"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -57,42 +54,49 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// ── Public routes ───────────────────────────────────────────────────────
-	r.GET("/health",    handleHealth)
+	// ── Public routes ─────────────────────────────────────────
+	r.GET("/health", handleHealth)
 	r.POST("/register", handleRegister)
-	r.POST("/login",    handleLogin)
+	r.POST("/login", handleLogin)
 
-	// ── Protected routes ────────────────────────────────────────────────────
+	// ✅ PUBLIC AI (for testing — remove later if needed)
+	r.POST("/claude", proxyToDataEngine("/chat"))
+
+	// ── Protected routes ──────────────────────────────────────
 	auth := r.Group("/", AuthMiddleware())
 	{
 		// Assets
-		auth.GET("/assets",          handleGetAssets)
-		auth.POST("/assets",         handleCreateAsset)
-		auth.PUT("/assets/:id",      handleUpdateAsset)
-		auth.DELETE("/assets/:id",   handleDeleteAsset)
+		auth.GET("/assets",        handleGetAssets)
+		auth.POST("/assets",       handleCreateAsset)
+		auth.PUT("/assets/:id",    handleUpdateAsset)
+		auth.DELETE("/assets/:id", handleDeleteAsset)
 
-		// Risk — proxied to Python data engine
+		// Risk
 		auth.POST("/risk/asset",       proxyToDataEngine("/risk/asset"))
 		auth.POST("/risk/portfolio",   proxyToDataEngine("/risk/portfolio"))
 		auth.POST("/risk/stress-test", proxyToDataEngine("/risk/stress-test"))
 		auth.GET("/risk/health",       proxyToDataEngineGET("/risk/health"))
 
-		// AI — proxied to data engine (which holds API keys server-side)
-		auth.POST("/analyze", proxyToDataEngine("/analyze"))
+		// AI (protected)
 		auth.POST("/chat",    proxyToDataEngine("/chat"))
+		auth.POST("/analyze", proxyToDataEngine("/analyze"))
+
+		// Optional: protected /claude also
+		auth.POST("/claude", proxyToDataEngine("/chat"))
 
 		// User
-		auth.GET("/me",     handleGetMe)
-		auth.PUT("/me",     handleUpdateMe)
+		auth.GET("/me", handleGetMe)
+		auth.PUT("/me", handleUpdateMe)
 	}
 
-	log.Printf("🚀 Prexus API Gateway v%s listening on :%s (env=%s)", VERSION, port, env)
+	log.Printf("🚀 Prexus API Gateway v%s running on :%s (env=%s)", VERSION, port, env)
+
 	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
 }
 
-// ── Health ─────────────────────────────────────────────────────────────────
+// ── Health ─────────────────────────────────────────────────
 
 func handleHealth(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
@@ -103,20 +107,25 @@ func handleHealth(c *gin.Context) {
 	})
 }
 
-// ── Request logger ─────────────────────────────────────────────────────────
+// ── Logger ─────────────────────────────────────────────────
 
 func requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
 		latency := time.Since(start)
+
 		log.Printf("[%d] %s %s %v",
-			c.Writer.Status(), c.Request.Method, c.Request.URL.Path, latency)
+			c.Writer.Status(),
+			c.Request.Method,
+			c.Request.URL.Path,
+			latency,
+		)
 	}
 }
 
+// ── Banner ─────────────────────────────────────────────────
 
-// Print startup banner
 func init() {
 	fmt.Printf(`
 ╔══════════════════════════════════════════╗
