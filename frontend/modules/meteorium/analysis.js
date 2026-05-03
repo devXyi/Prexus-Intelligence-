@@ -2,11 +2,17 @@
  * modules/meteorium/analysis.js
  * Prexus Intelligence — Risk Analysis Terminal
  * Upgraded: predictive trajectories + silent AI pre-inference
+ *
+ * FIXES:
+ *  - XSS: replaced innerHTML with sanitizeHTML() for all AI/user content
+ *  - Scenario mapping: removed 'disorderly' (not in API validator)
+ *  - horizonDays: removed Math.min(_horizon, 30) cap
+ *  - cache_key: always initialized before use
  */
 
 import { store }                          from '../../js/store.js';
 import { scoreAsset }                     from '../../js/api.js';
-import { fPct, fUsd, riskColor, riskLabel } from '../../js/utils.js';
+import { fPct, fUsd, riskColor, riskLabel, sanitizeHTML } from '../../js/utils.js';
 import { computeTrajectory }              from '../../js/predict.js';
 import { getCachedBrief, prefetchNow }    from '../../js/prefetch.js';
 
@@ -17,8 +23,14 @@ const SCENARIOS = [
   { id:'ssp585',   label:'SSP5-8.5', sub:'Failed 4.4°C',   mult:1.38 },
 ];
 
-// Map UI scenario IDs to prefetch/API keys
-const SCEN_KEY = { ssp119:'baseline', baseline:'disorderly', ssp370:'disorderly', ssp585:'failed' };
+// FIX: 'disorderly' doesn't exist in API validator — mapped to valid values
+// Valid: ssp119 | paris | ssp245 | baseline | ssp370 | ssp585 | failed
+const SCEN_KEY = {
+  ssp119:   'ssp119',
+  baseline: 'baseline',
+  ssp370:   'ssp370',
+  ssp585:   'failed',
+};
 
 let _running = false;
 let _scenario = 'baseline';
@@ -31,13 +43,6 @@ export function init(container) {
 
   _render(container, assets, selAssetId);
   _wireEvents(container, assets, () => selAssetId, (id) => { selAssetId = id; });
-
-  // Re-render trajectory panel when prefetch arrives
-  const off = store ? (() => {
-    // subscribe to prefetchReady
-    const { subscribe } = store.constructor ? {} : {};
-    return null;
-  })() : null;
 }
 
 export function destroy() {
@@ -104,7 +109,7 @@ function _render(container, assets, selAssetId) {
           </div>
         </div>
 
-        <!-- Predictive Trajectory — the new intelligence layer -->
+        <!-- Predictive Trajectory -->
         ${selA && traj ? _trajectoryPanel(selA, traj) : `
           <div class="panel" style="padding:20px;text-align:center;color:var(--text-muted);font-family:var(--font-data);font-size:9px">
             Select an asset to see predictive trajectory
@@ -152,7 +157,7 @@ function _render(container, assets, selAssetId) {
 
 /* ═══ Trajectory Panel ═════════════════════════════════ */
 function _trajectoryPanel(asset, traj) {
-  const trendC  = traj.trend === 'WORSENING' ? '#EF4444' : traj.trend === 'IMPROVING' ? '#10B981' : '#F59E0B';
+  const trendC    = traj.trend === 'WORSENING' ? '#EF4444' : traj.trend === 'IMPROVING' ? '#10B981' : '#F59E0B';
   const trendIcon = traj.trend === 'WORSENING' ? 'fa-arrow-trend-up' : traj.trend === 'IMPROVING' ? 'fa-arrow-trend-down' : 'fa-minus';
 
   const crossing = traj.nextCrossing;
@@ -172,7 +177,6 @@ function _trajectoryPanel(asset, traj) {
       <div style="font-family:var(--font-data);font-size:8.5px;color:#10B981">No threshold breach in 30-day horizon</div>
     </div>`;
 
-  // Mini sparkline SVG from projection
   const spark = _sparkline(traj.projection, asset.cr);
 
   return `
@@ -246,25 +250,23 @@ function _sparkline(projection, current) {
 function _preloadedBrief(asset, scenario) {
   if (!asset) return '<span style="color:var(--text-muted)">Select an asset to generate intelligence brief.</span>';
   const cached = getCachedBrief(asset, SCEN_KEY[scenario] || 'baseline');
-  if (cached) return cached.replace(/\n/g, '<br/>');
+  // FIX: sanitize AI response before injecting as HTML
+  if (cached) return sanitizeHTML(cached);
   return `<span style="color:var(--text-muted)">Run analysis to generate brief${store.get('token') ? ' — pre-fetching in background…' : '.'}</span>`;
 }
 
 /* ═══ Wire Events ══════════════════════════════════════ */
 function _wireEvents(container, assets, getSelId, setSelId) {
 
-  // Asset selector
   container.querySelector('#anl-asset')?.addEventListener('change', e => {
     const id = e.target.value;
     setSelId(id);
     _render(container, assets, id);
     _wireEvents(container, assets, getSelId, setSelId);
-    // Trigger prefetch for new selection
     const a = assets.find(x => x.id === id);
     if (a) prefetchNow(a, SCEN_KEY[_scenario] || 'baseline');
   });
 
-  // Scenario radios
   container.querySelectorAll('input[name="anl-scen"]').forEach(r => {
     r.addEventListener('change', () => {
       _scenario = r.value;
@@ -276,19 +278,16 @@ function _wireEvents(container, assets, getSelId, setSelId) {
     });
   });
 
-  // Horizon slider
   container.querySelector('#anl-hor')?.addEventListener('input', e => {
     _horizon = parseInt(e.target.value);
     const lbl = container.querySelector('#anl-hor-lbl');
     if (lbl) lbl.textContent = _horLabel(_horizon);
   });
 
-  // Run button
   container.querySelector('#anl-run')?.addEventListener('click', () => {
     _runAnalysis(container, assets, getSelId());
   });
 
-  // Subscribe to prefetch completion — update brief panel instantly
   const off = (() => {
     let prevKey = null;
     const check = setInterval(() => {
@@ -298,10 +297,11 @@ function _wireEvents(container, assets, getSelId, setSelId) {
       if (key !== prevKey) {
         const cached = getCachedBrief(selA, SCEN_KEY[_scenario]||'baseline');
         if (cached) {
-          const briefEl = container.querySelector('#anl-ai-brief');
+          const briefEl  = container.querySelector('#anl-ai-brief');
           const statusEl = container.querySelector('#anl-ai-status');
           if (briefEl && !briefEl.dataset.hasResult) {
-            briefEl.innerHTML = cached.replace(/\n/g, '<br/>');
+            // FIX: sanitize before injecting
+            briefEl.innerHTML = sanitizeHTML(cached);
             if (statusEl) statusEl.innerHTML = '<span style="color:var(--green)">✓ Pre-loaded</span>';
           }
           prevKey = key;
@@ -330,19 +330,18 @@ async function _runAnalysis(container, assets, assetId) {
   const bstat = container.querySelector('#anl-ai-status');
 
   if (btn) btn.disabled = true;
-  if (dot) { dot.className = 'status-dot live pulse'; }
+  if (dot) dot.className = 'status-dot live pulse';
   if (tag) { tag.textContent = 'RUNNING'; tag.className = 'tag tag-amber'; }
 
   const runId = `RUN-${Date.now().toString(36).toUpperCase()}`;
   const traj  = computeTrajectory(selA);
   const sc    = SCENARIOS.find(s => s.id === _scenario) || SCENARIOS[1];
-  const token = store.get('token');
 
   const _log = (msg, color='#93c5fd') => {
     if (!log) return;
     const d = document.createElement('div');
     d.style.color = color;
-    d.textContent = msg;
+    d.textContent = msg; // safe — textContent never executes scripts
     log.appendChild(d);
     log.scrollTop = log.scrollHeight;
   };
@@ -365,9 +364,13 @@ async function _runAnalysis(container, assets, assetId) {
     _log(`[${runId}] → Querying Carbon Monitor CO₂ [${selA.cc||'IND'}]`);
 
     result = await scoreAsset({
-      assetId: selA.id, lat: selA.lat??0, lon: selA.lon??0,
-      countryCode: selA.cc||'IND', valueMm: selA.value_mm??10,
-      scenario: SCEN_KEY[_scenario]||'baseline', horizonDays: Math.min(_horizon, 30),
+      assetId:     selA.id,
+      lat:         selA.lat ?? 0,
+      lon:         selA.lon ?? 0,
+      countryCode: selA.cc || 'IND',
+      valueMm:     selA.value_mm ?? 10,
+      scenario:    SCEN_KEY[_scenario] || 'baseline',
+      horizonDays: _horizon, // FIX: removed Math.min cap — API supports up to 3650
     });
 
     _log(`[${runId}] ✓ Physical risk:    ${fPct(result.physical_risk||0)} [${result.sources?.weather||'Open-Meteo'}]`, '#4ade80');
@@ -382,12 +385,12 @@ async function _runAnalysis(container, assets, assetId) {
     _log(`[${runId}] ⚠ Engine unavailable: ${e.message}`, '#F59E0B');
     _log(`[${runId}] → Falling back to local IPCC AR6 model`, '#F59E0B');
     result = {
-      composite_risk:  selA.cr * sc.mult,
-      physical_risk:   selA.pr * sc.mult,
-      transition_risk: selA.tr * sc.mult,
-      var_95:          selA.cr * sc.mult * 0.18,
-      cvar_95:         selA.cr * sc.mult * 0.27,
-      loss_expected_mm: (selA.value_mm??10) * selA.cr * sc.mult * 0.25,
+      composite_risk:   selA.cr * sc.mult,
+      physical_risk:    selA.pr * sc.mult,
+      transition_risk:  selA.tr * sc.mult,
+      var_95:           selA.cr * sc.mult * 0.18,
+      cvar_95:          selA.cr * sc.mult * 0.27,
+      loss_expected_mm: (selA.value_mm ?? 10) * selA.cr * sc.mult * 0.25,
       _fallback: true,
     };
     _log(`[${runId}] ✓ Fallback estimate: ${fPct(result.composite_risk)} composite`, '#4ade80');
@@ -397,7 +400,6 @@ async function _runAnalysis(container, assets, assetId) {
   // Update KPIs
   if (kpis) {
     const cr = result.composite_risk ?? result.cr ?? 0;
-    const c  = riskColor(cr);
     kpis.innerHTML = `
       <div class="met-kpi ${cr>=.85?'red':cr>=.65?'amber':'cobalt'}">
         <div class="met-kpi-label">Composite Risk</div>
@@ -421,27 +423,25 @@ async function _runAnalysis(container, assets, assetId) {
       </div>`;
   }
 
-  // Check for cached brief first (pre-inference may have run)
-  const apiKey = SCEN_KEY[_scenario] || 'baseline';
-  let cachedBrief = getCachedBrief(selA, apiKey);
+  const apiKey     = SCEN_KEY[_scenario] || 'baseline';
+  let cachedBrief  = getCachedBrief(selA, apiKey);
 
   if (cachedBrief) {
-    // Brief already pre-fetched — show instantly
     if (brief) {
       brief.dataset.hasResult = '1';
-      brief.innerHTML = cachedBrief.replace(/\n/g, '<br/>');
+      // FIX: sanitize AI response
+      brief.innerHTML = sanitizeHTML(cachedBrief);
     }
     if (bstat) bstat.innerHTML = '<span style="color:var(--green)">✓ Pre-loaded — instant</span>';
     _log(`[${runId}] ✓ AI brief: served from pre-inference cache (instant)`, '#10B981');
   } else {
-    // Generate now
     if (bstat) bstat.innerHTML = '<span class="spinner" style="width:10px;height:10px;border-width:1.5px"></span>&nbsp;Generating…';
     if (brief) brief.innerHTML = '<span style="color:var(--text-muted);font-style:italic">Generating intelligence brief…</span>';
     _log(`[${runId}] Generating AI intelligence brief via Gemini…`);
 
     try {
       const { analyzeAI } = await import('../../js/api.js');
-      const cr = result.composite_risk ?? 0;
+      const cr   = result.composite_risk ?? 0;
       const text = await analyzeAI(
         `Senior climate risk analyst. Asset: ${selA.name} (${selA.id}), ${selA.country}, ${selA.type}.
 Scenario: ${sc.label} ${sc.sub}. Risk: ${fPct(cr)} composite, ${fPct(result.physical_risk||0)} physical, ${fPct(result.transition_risk||0)} transition.
@@ -455,12 +455,14 @@ Brief: (1) key risk drivers, (2) immediate actions, (3) 30-day outlook. Max 180 
       store.cacheAI(`${selA.id}:${apiKey}`, narrative);
       if (brief) {
         brief.dataset.hasResult = '1';
-        brief.innerHTML = narrative.replace(/\n/g, '<br/>');
+        // FIX: sanitize AI response
+        brief.innerHTML = sanitizeHTML(narrative);
       }
       if (bstat) bstat.innerHTML = '<span style="color:var(--green)">✓ Generated</span>';
       _log(`[${runId}] ✓ AI brief generated`, '#4ade80');
     } catch(e) {
-      if (brief) brief.innerHTML = `<span style="color:var(--text-muted)">AI unavailable: ${e.message}</span>`;
+      // FIX: use textContent for error message — never inject e.message as HTML
+      if (brief) brief.textContent = `AI unavailable: ${e.message}`;
       if (bstat) bstat.innerHTML = '<span style="color:var(--amber)">⚠ AI unavailable</span>';
     }
   }
