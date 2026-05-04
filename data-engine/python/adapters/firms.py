@@ -83,7 +83,7 @@ class FIRMSAdapter(BaseAdapter):
 
     def __init__(self, radius_km: float = 100.0):
         super().__init__()
-        self._api_key   = os.environ.get("FIRMS_API_KEY", "")
+        self._api_key = os.environ.get("NASA_FIRMS_KEY") or os.environ.get("FIRMS_API_KEY", "")
         self._radius_km = radius_km
         if not self._api_key:
             logger.warning("[FIRMS] FIRMS_API_KEY not set — fire data will be unavailable")
